@@ -59,6 +59,60 @@ pip install -e .
 python -m pull1sec user set && python -m pull1sec
 ```
 
+## Wifi'ye açmak
+
+Sunucu zaten tüm arayüzlere bağlanır (`PULL1SEC_HOST` varsayılanı `0.0.0.0`),
+yani ek bir ayar gerekmez. Erişimi engelleyen şey neredeyse her zaman güvenlik
+duvarıdır.
+
+**1. Portu yalnızca kendi alt ağınıza açın.** Bu makinede `ufw` etkin olduğu için
+kural eklenmezse telefon bağlanamaz:
+
+```bash
+# Alt ağı bulun (örnek çıktı: 192.168.1.26/24 → alt ağ 192.168.1.0/24)
+ip -4 -o addr show scope global | grep wl
+
+# Sadece yerel ağa izin verin
+sudo ufw allow from 192.168.1.0/24 to any port 8787 proto tcp comment 'Pull1sec'
+sudo ufw status | grep 8787
+```
+
+**2. Adresi öğrenin ve telefondan açın:**
+
+```bash
+pull1sec url
+# yerel  http://127.0.0.1:8787
+# ağ     http://192.168.1.26:8787      ← telefonun wifi'deyken açacağı adres
+```
+
+**Açılmıyorsa sırayla kontrol edin:**
+
+- Telefon **aynı** wifi ağında mı (misafir ağı ayrı bir ağdır)?
+- Router'da "AP isolation" / "client isolation" / "izolasyon" kapalı mı? Açıksa
+  cihazlar birbirini hiç göremez.
+- Bilgisayarda VPN açık mı? Kapatın; trafiği tünele alır.
+- Başka bir port kullanıyorsanız ufw kuralını da ona göre yazın.
+- `ss -ltnp | grep 8787` çıktısı `0.0.0.0:8787` olmalı — `127.0.0.1:8787` ise
+  `PULL1SEC_HOST=127.0.0.1` ayarlı demektir.
+
+### Sürekli açık kalsın
+
+`deploy/pull1sec.service` bir systemd kullanıcı servisidir; oturum açık olmasa da
+sunucu ayakta kalır:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp deploy/pull1sec.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now pull1sec
+systemctl --user status pull1sec      # durum
+journalctl --user -u pull1sec -f      # canlı günlük
+loginctl enable-linger "$USER"        # oturum kapanınca da çalışsın
+```
+
+Port 8787 ayrıcalıksız olduğu için servis root gerektirmez. Kapatmak için
+`systemctl --user disable --now pull1sec`.
+
 ## Nasıl kullanılır
 
 1. Bağlantıyı yapıştır (**Yapıştır** butonu panodan okur) ve **Analiz et**.

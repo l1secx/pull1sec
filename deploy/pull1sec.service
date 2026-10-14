@@ -1,0 +1,24 @@
+[Unit]
+Description=Pull1sec — video downloader, reachable from the local network
+Documentation=file://%h/web/pull1sec/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# The default port (8787) is unprivileged, so this needs no root and no
+# capabilities of its own.
+ExecStart=%h/.local/bin/pull1sec serve
+WorkingDirectory=%h/web/pull1sec
+Restart=on-failure
+RestartSec=3
+
+# Modest hardening. Deliberately no ProtectHome: yt-dlp writes its cache under
+# ~/.cache and Python reads the editable install from the source tree.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectControlGroups=true
+
+[Install]
+WantedBy=default.target
