@@ -46,3 +46,29 @@ class JobNotReadyError(Pull1secError):
 class TooManyJobsError(Pull1secError):
     code = "too_many_jobs"
     status_code = 429
+
+
+class UnauthorizedError(Pull1secError):
+    """A request that needs a session arrived without a valid one."""
+
+    code = "unauthorized"
+    status_code = 401
+
+
+class AuthSetupRequiredError(Pull1secError):
+    """No account exists yet, so nobody can log in."""
+
+    code = "auth_not_configured"
+    status_code = 409
+
+
+class BadCredentialsError(Pull1secError):
+    code = "bad_credentials"
+    status_code = 401
+
+
+class TooManyAttemptsError(Pull1secError):
+    """Too many failed logins from this address."""
+
+    code = "too_many_attempts"
+    status_code = 429

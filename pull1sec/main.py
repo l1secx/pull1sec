@@ -6,38 +6,61 @@ import asyncio
 import json
 import logging
 import shutil
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, FastAPI, Query, Request
+from fastapi import APIRouter, Depends, FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
+from .auth import (
+    SESSION_COOKIE,
+    AuthNotConfigured,
+    AuthStore,
+    Session,
+)
 from .config import SUPPORTED_COOKIE_BROWSERS, settings
 from .downloader import AUDIO_CODECS, probe, run_download
 from .errors import (
-    Pull1secError,
+    AuthSetupRequiredError,
+    BadCredentialsError,
     JobNotFoundError,
     JobNotReadyError,
     MediaUnavailableError,
+    Pull1secError,
+    TooManyAttemptsError,
     TooManyJobsError,
+    UnauthorizedError,
 )
 from .jobs import JobManager, JobStatus
 from .models import (
+    AuthStateResponse,
+    ChallengeRequest,
+    ChallengeResponse,
     DownloadRequest,
     DownloadResponse,
     ErrorResponse,
     JobView,
+    LoginRequest,
+    LoginResponse,
     MediaInfo,
     MetaResponse,
     ProbeRequest,
     ProbeResponse,
+    SessionView,
 )
-from .utils import InvalidURLError, guard_url, sanitize_filename
+from .utils import (
+    InvalidURLError,
+    guard_url,
+    is_loopback_host,
+    sanitize_filename,
+    server_urls,
+)
 
 log = logging.getLogger("pull1sec")
 
@@ -62,6 +85,17 @@ manager = JobManager(
 )
 manager.set_runner(lambda job: run_download(job, settings=settings))
 
+auth = AuthStore(settings.auth_path)
+
+
+def lan_urls() -> list[str]:
+    """URLs other devices on this network can use to reach this server."""
+    return server_urls(settings.host, settings.port)["lan"]
+
+
+def _client_address(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
 
 async def _sweeper() -> None:
     interval = min(300, max(60, settings.job_ttl_seconds // 4))
@@ -73,9 +107,23 @@ async def _sweeper() -> None:
             log.exception("background sweep failed")
 
 
+AUTH_SETUP_HINT = (
+    "No account is configured, so nobody could sign in. Create one first:\n"
+    "    pull1sec user set\n"
+    "Then start the server again. (Set PULL1SEC_REQUIRE_AUTH=0 to serve the "
+    "whole API to the network without a password — not recommended.)"
+)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     settings.ensure_dirs()
+    auth.prune_sessions()
+
+    if settings.require_auth and not auth.configured and not is_loopback_host(settings.host):
+        # Fail closed rather than exposing every endpoint to the network.
+        raise RuntimeError(AUTH_SETUP_HINT)
+
     task = asyncio.create_task(_sweeper())
     try:
         yield
@@ -120,7 +168,43 @@ async def _validation_error_handler(_: Request, exc: RequestValidationError) -> 
     return JSONResponse(status_code=422, content=body.model_dump())
 
 
-# --------------------------------------------------------------------- meta
+# ------------------------------------------------------------------- auth
+
+
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+def _same_origin(request: Request) -> bool:
+    """Reject state-changing requests that a foreign page started.
+
+    The session cookie is SameSite=Lax, so a cross-site POST would not carry it
+    anyway; this is a second lock on the same door.
+    """
+    origin = request.headers.get("origin")
+    if not origin:
+        return True
+    if origin in {"null", "file://"}:
+        return False
+    host = request.headers.get("host", "")
+    return urlsplit(origin).netloc == host
+
+
+def require_session(request: Request) -> Session:
+    """Dependency for every endpoint that is not the login handshake."""
+    if request.method not in SAFE_METHODS and not _same_origin(request):
+        raise UnauthorizedError("That request came from another site.")
+
+    token = request.cookies.get(SESSION_COOKIE)
+    session = auth.resolve_session(token)
+    if session is None:
+        raise UnauthorizedError("Sign in to continue.")
+    auth.touch_session(session)
+    return session
+
+
+#: Everything that needs a signed-in browser hangs off this router, so a new
+#: endpoint cannot be added without noticing that it is protected.
+protected = APIRouter(prefix="/api", dependencies=[Depends(require_session)])
 
 
 @api.get("/health")
@@ -130,10 +214,134 @@ async def health() -> dict[str, Any]:
         "version": __version__,
         "yt_dlp": _yt_dlp_version(),
         "ffmpeg": shutil.which("ffmpeg") is not None,
+        "auth_configured": auth.configured,
     }
 
 
-@api.get("/meta", response_model=MetaResponse)
+@api.get("/auth/me", response_model=AuthStateResponse)
+async def auth_me(request: Request) -> AuthStateResponse:
+    """Public: tells the SPA whether to show the login screen."""
+    session = auth.resolve_session(request.cookies.get(SESSION_COOKIE))
+    if session is None:
+        return AuthStateResponse(authenticated=False, configured=auth.configured)
+    return _auth_state(session)
+
+
+def _auth_state(session: Session) -> AuthStateResponse:
+    metadata = auth.metadata()
+    return AuthStateResponse(
+        authenticated=True,
+        configured=True,
+        username=auth.username,
+        expires_at=session.expires_at,
+        registered_at=metadata.get("updated_at"),
+        sessions=[_session_view(item, current=item.id) for item in auth.list_sessions()],
+    )
+
+
+def _session_view(item: Session, *, current: str | None = None) -> SessionView:
+    from .utils import describe_user_agent
+
+    return SessionView(
+        id=item.id,
+        device=describe_user_agent(item.user_agent),
+        address=item.address,
+        created_at=item.created_at,
+        last_seen_at=item.last_seen_at,
+        expires_at=item.expires_at,
+        current=item.id == current,
+    )
+
+
+@api.post("/auth/challenge", response_model=ChallengeResponse)
+async def auth_challenge(payload: ChallengeRequest, request: Request) -> ChallengeResponse:
+    """Hand out a single-use nonce so the password never crosses the wire."""
+    address = _client_address(request)
+    remaining = auth.lockout_remaining(address)
+    if remaining > 0:
+        raise TooManyAttemptsError(f"Too many failed attempts. Try again in {int(remaining)}s.")
+    try:
+        challenge = auth.create_challenge()
+    except AuthNotConfigured as exc:
+        raise AuthSetupRequiredError(str(exc)) from exc
+    return ChallengeResponse(**challenge)
+
+
+@api.post("/auth/login", response_model=LoginResponse)
+async def auth_login(payload: LoginRequest, request: Request) -> JSONResponse:
+    address = _client_address(request)
+    remaining = auth.lockout_remaining(address)
+    if remaining > 0:
+        raise TooManyAttemptsError(f"Too many failed attempts. Try again in {int(remaining)}s.")
+
+    if not auth.verify_proof(payload.username, payload.nonce, payload.proof):
+        delay = auth.note_failure(address)
+        log.warning("failed login from %s", address)
+        if delay:
+            raise TooManyAttemptsError(
+                f"Too many failed attempts. Locked for {int(delay)}s."
+            )
+        raise BadCredentialsError("Wrong username or password.")
+
+    auth.note_success(address)
+    ttl = settings.session_ttl_seconds if payload.remember else min(
+        settings.session_ttl_seconds, 12 * 3600
+    )
+    token, session = auth.create_session(
+        ttl_seconds=ttl,
+        user_agent=request.headers.get("user-agent"),
+        address=address,
+    )
+
+    response = JSONResponse(
+        LoginResponse(
+            username=auth.username or payload.username,
+            expires_at=session.expires_at,
+        ).model_dump()
+    )
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        max_age=int(session.expires_at - time.time()) if payload.remember else None,
+        httponly=True,
+        samesite="lax",
+        # No `secure=True`: the app is served over plain HTTP on a LAN, and a
+        # secure cookie would simply never be sent. That is exactly why the
+        # login uses a challenge/response instead of sending the password.
+        path="/",
+    )
+    log.info("login from %s (%s)", address, describe_device(request))
+    return response
+
+
+def describe_device(request: Request) -> str:
+    from .utils import describe_user_agent
+
+    return describe_user_agent(request.headers.get("user-agent"))
+
+
+@api.post("/auth/logout")
+async def auth_logout(request: Request) -> JSONResponse:
+    auth.revoke_session(request.cookies.get(SESSION_COOKIE) or "")
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return response
+
+
+@api.post("/auth/logout-all")
+async def auth_logout_all(request: Request) -> JSONResponse:
+    """Requires a session, then drops every device including this one."""
+    require_session(request)
+    count = auth.revoke_all()
+    response = JSONResponse({"ok": True, "revoked": count})
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return response
+
+
+# --------------------------------------------------------------------- meta
+
+
+@protected.get("/meta", response_model=MetaResponse)
 async def meta() -> MetaResponse:
     return MetaResponse(
         name="Pull1sec",
@@ -149,7 +357,7 @@ async def meta() -> MetaResponse:
 # --------------------------------------------------------------------- probe
 
 
-@api.post("/probe", response_model=ProbeResponse)
+@protected.post("/probe", response_model=ProbeResponse)
 async def probe_endpoint(payload: ProbeRequest) -> ProbeResponse:
     try:
         url = guard_url(payload.url, allow_private_hosts=settings.allow_private_hosts)
@@ -178,7 +386,7 @@ async def probe_endpoint(payload: ProbeRequest) -> ProbeResponse:
 # ------------------------------------------------------------------ download
 
 
-@api.post("/download", response_model=DownloadResponse)
+@protected.post("/download", response_model=DownloadResponse)
 async def download_endpoint(payload: DownloadRequest) -> DownloadResponse:
     try:
         url = guard_url(payload.url, allow_private_hosts=settings.allow_private_hosts)
@@ -203,13 +411,13 @@ async def download_endpoint(payload: DownloadRequest) -> DownloadResponse:
     return DownloadResponse(job=JobView(**job.snapshot()))
 
 
-@api.get("/jobs", response_model=list[JobView])
+@protected.get("/jobs", response_model=list[JobView])
 async def list_jobs(limit: int = Query(default=25, ge=1, le=100)) -> list[JobView]:
     jobs = manager.all()[:limit]
     return [JobView(**job.snapshot()) for job in jobs]
 
 
-@api.get("/jobs/{job_id}", response_model=JobView)
+@protected.get("/jobs/{job_id}", response_model=JobView)
 async def get_job(job_id: str) -> JobView:
     job = manager.get(job_id)
     if job is None:
@@ -221,7 +429,7 @@ def _sse(event: str, data: Any) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-@api.get("/jobs/{job_id}/events")
+@protected.get("/jobs/{job_id}/events")
 async def job_events(job_id: str) -> StreamingResponse:
     job = manager.get(job_id)
     if job is None:
@@ -248,7 +456,7 @@ async def job_events(job_id: str) -> StreamingResponse:
     )
 
 
-@api.post("/jobs/{job_id}/cancel", response_model=JobView)
+@protected.post("/jobs/{job_id}/cancel", response_model=JobView)
 async def cancel_job(job_id: str) -> JobView:
     job = manager.get(job_id)
     if job is None:
@@ -257,14 +465,14 @@ async def cancel_job(job_id: str) -> JobView:
     return JobView(**job.snapshot())
 
 
-@api.delete("/jobs/{job_id}")
+@protected.delete("/jobs/{job_id}")
 async def delete_job(job_id: str) -> dict[str, bool]:
     if not manager.discard(job_id):
         raise JobNotFoundError("That download no longer exists.")
     return {"ok": True}
 
 
-@api.get("/jobs/{job_id}/file")
+@protected.get("/jobs/{job_id}/file")
 async def job_file(job_id: str) -> FileResponse:
     job = manager.get(job_id)
     if job is None:
@@ -285,7 +493,7 @@ async def job_file(job_id: str) -> FileResponse:
 # --------------------------------------------------------------- thumbnails
 
 
-@api.get("/thumbnail")
+@protected.get("/thumbnail")
 async def thumbnail(url: str = Query(min_length=8, max_length=2048)) -> Response:
     """Small proxy so CDN thumbnails that require a referer still render."""
     try:
@@ -328,6 +536,7 @@ async def thumbnail(url: str = Query(min_length=8, max_length=2048)) -> Response
 
 
 app.include_router(api)
+app.include_router(protected)
 
 # The SPA is mounted last so it never shadows /api routes.
 if STATIC_DIR.is_dir():

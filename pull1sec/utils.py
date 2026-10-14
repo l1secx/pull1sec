@@ -173,3 +173,148 @@ def platform_label(extractor_key: str | None, extractor: str | None) -> str:
         return "Web"
     # "SomeSiteIE" -> "Somesite"
     return source[:1].upper() + source[1:]
+
+
+# ------------------------------------------------------------------- network
+
+
+#: Prefixes of interfaces that never accept a phone on the wifi.
+VIRTUAL_INTERFACE_PREFIXES = (
+    "docker",
+    "br-",
+    "veth",
+    "virbr",
+    "vmnet",
+    "vboxnet",
+    "tun",
+    "tap",
+    "wg",
+    "zt",
+    "tailscale",
+    "podman",
+    "cni",
+    "dummy",
+)
+
+
+def _primary_address() -> str | None:
+    """The address of the interface carrying the default route, if any."""
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect(("8.8.8.8", 80))
+        address = probe.getsockname()[0]
+        return address if not address.startswith("127.") else None
+    except OSError:
+        return None
+    finally:
+        probe.close()
+
+
+def _addresses_from_ip_command() -> list[str]:
+    """Ask iproute2, which also tells us the interface name."""
+    import shutil
+    import subprocess
+
+    if not shutil.which("ip"):
+        return []
+
+    try:
+        result = subprocess.run(
+            ["ip", "-4", "-o", "addr", "show", "scope", "global"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+    addresses: list[str] = []
+    for line in result.stdout.splitlines():
+        # e.g. "3: wlan0    inet 192.168.1.26/24 brd ... scope global wlan0"
+        fields = line.split()
+        if len(fields) < 4 or fields[2] != "inet":
+            continue
+        name = fields[1]
+        if any(name.startswith(prefix) for prefix in VIRTUAL_INTERFACE_PREFIXES):
+            continue
+        address = fields[3].split("/")[0]
+        if address and not address.startswith("127."):
+            addresses.append(address)
+    return addresses
+
+
+def local_ipv4_addresses() -> list[str]:
+    """Non-loopback IPv4 addresses, most likely one first.
+
+    The interface carrying the default route comes first: that is the address a
+    phone on the same wifi should be given. Bridges for containers and virtual
+    machines are skipped unless iproute2 is unavailable.
+    """
+    primary = _primary_address()
+
+    found = _addresses_from_ip_command()
+    if not found:
+        try:
+            found = [info[4][0] for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)]
+        except OSError:
+            found = []
+        found = [address for address in found if not address.startswith("127.")]
+
+    unique = {address for address in found if not address.startswith("127.")}
+    ordered = ([primary] if primary else []) + sorted(unique - {primary})
+    return ordered
+
+
+def is_loopback_host(host: str) -> bool:
+    """True when ``host`` keeps the server on this machine only."""
+    return host in {"127.0.0.1", "localhost", "::1"}
+
+
+def server_urls(host: str, port: int) -> dict[str, list[str]]:
+    """The addresses this server answers on, split into local and LAN."""
+    local = [f"http://127.0.0.1:{port}"]
+    lan: list[str] = []
+    if not is_loopback_host(host):
+        addresses = [host] if host not in {"0.0.0.0", "::"} else local_ipv4_addresses()
+        lan = [f"http://{address}:{port}" for address in addresses]
+    return {"local": local, "lan": lan}
+
+
+def describe_user_agent(user_agent: str | None) -> str:
+    """Short, human label for a session list, e.g. ``Chrome · Android``."""
+    if not user_agent:
+        return "unknown"
+
+    browsers = (
+        ("Edg/", "Edge"),
+        ("OPR/", "Opera"),
+        ("Firefox/", "Firefox"),
+        ("Chrome/", "Chrome"),
+        ("Safari/", "Safari"),
+        ("curl/", "curl"),
+        ("python-requests", "requests"),
+    )
+    systems = (
+        ("Android", "Android"),
+        ("iPhone", "iPhone"),
+        ("iPad", "iPad"),
+        ("Windows", "Windows"),
+        ("Macintosh", "macOS"),
+        ("Linux", "Linux"),
+    )
+
+    browser = next((label for token, label in browsers if token in user_agent), None)
+    if browser is None:
+        lowered = user_agent.lower()
+        for token, label in browsers:
+            if token.lower() in lowered:
+                browser = label
+                break
+
+    system = next((label for token, label in systems if token in user_agent), None)
+
+    if browser and system:
+        return f"{browser} · {system}"
+    return browser or "other"
+

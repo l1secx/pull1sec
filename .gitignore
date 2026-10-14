@@ -10,3 +10,8 @@ dist/
 build/
 .ruff_cache/
 .DS_Store
+
+# Credentials must never be committed. They live outside the repo by default
+# (~/.local/state/pull1sec); these entries are a safety net.
+auth.json
+.pull1sec/

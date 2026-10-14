@@ -12,7 +12,62 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <div class="app">
+  <div class="boot" id="boot">
+    <span class="boot-mark" aria-hidden="true"></span>
+    <p data-i18n="boot.checking">Kontrol ediliyor…</p>
+  </div>
+
+  <section class="login" id="login" hidden aria-labelledby="login-title">
+    <form class="login-card" id="login-form" novalidate>
+      <span class="login-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="26" height="26">
+          <path d="M16 7.5v10.5m0 0 4.4-4.4M16 18l-4.4-4.4M9 23h14"
+                fill="none" stroke="currentColor" stroke-width="2.5"
+                stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </span>
+
+      <h1 id="login-title" data-i18n="login.title">Giriş yap</h1>
+      <p class="login-sub" id="login-sub" data-i18n="login.subtitle">Devam etmek için hesabına gir.</p>
+
+      <div class="login-empty" id="login-empty" hidden>
+        <p data-i18n="login.notConfigured">Bu sunucuda henüz hesap yok.</p>
+        <code class="login-cmd">pull1sec user set</code>
+        <p data-i18n="login.notConfiguredHint">
+          Terminalde bu komutu çalıştırıp şifreyi belirle. Kayıt ekranı bilinçli olarak yok:
+          ilk gelen kişi hesabı ele geçiremez.
+        </p>
+      </div>
+
+      <div class="field">
+        <label for="login-username" data-i18n="login.username">Kullanıcı adı</label>
+        <input id="login-username" type="text" autocomplete="username" autocapitalize="off"
+               spellcheck="false" required />
+      </div>
+
+      <div class="field">
+        <label for="login-password" data-i18n="login.password">Şifre</label>
+        <input id="login-password" type="password" autocomplete="current-password" required />
+      </div>
+
+      <label class="checkbox">
+        <input type="checkbox" id="login-remember" checked />
+        <span data-i18n="login.remember">Bu cihazda açık kalsın</span>
+      </label>
+
+      <button type="submit" class="primary-btn" id="login-btn">
+        <span data-i18n="login.submit">Giriş</span>
+      </button>
+
+      <p class="login-status" id="login-status" role="status" aria-live="polite"></p>
+      <p class="login-note" data-i18n="login.note">
+        Sunucu düz HTTP üzerinden yayın yapar; bu yüzden şifre cihazdan hiç çıkmaz,
+        yalnızca tek kullanımlık bir kanıt gönderilir.
+      </p>
+    </form>
+  </section>
+
+  <div class="app" id="app" hidden>
     <header class="topbar">
       <a class="brand" href="/">
         <span class="brand-mark" aria-hidden="true">
@@ -44,6 +99,25 @@
                   fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" />
           </svg>
         </button>
+
+        <div class="account" id="account" hidden>
+          <button type="button" id="account-btn" class="chip-btn chip-btn--account"
+                  aria-haspopup="true" aria-expanded="false" aria-controls="account-menu">
+            <span class="account-dot" aria-hidden="true"></span>
+            <span id="account-name">…</span>
+          </button>
+
+          <div class="menu" id="account-menu" role="menu" hidden>
+            <p class="menu-label" data-i18n="account.sessions">Oturumlar</p>
+            <ul class="session-list" id="session-list"></ul>
+            <div class="menu-actions">
+              <button type="button" class="ghost-btn ghost-btn--small" id="logout-btn"
+                      data-i18n="account.logout">Çıkış yap</button>
+              <button type="button" class="ghost-btn ghost-btn--small" id="logout-all-btn"
+                      data-i18n="account.logoutAll">Tüm cihazlardan çıkış</button>
+            </div>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -181,6 +255,7 @@
     </li>
   </template>
 
+  <script src="/auth.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

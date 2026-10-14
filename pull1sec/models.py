@@ -129,8 +129,60 @@ class MetaResponse(BaseModel):
     audio_formats: list[str]
 
 
+# ------------------------------------------------------------------- auth
+
+
+class ChallengeRequest(BaseModel):
+    #: Optional: the server answers identically whether or not it matches.
+    username: str | None = Field(default=None, max_length=64)
+
+
+class ChallengeResponse(BaseModel):
+    ok: bool = True
+    nonce: str
+    salt: str
+    iterations: int
+    algorithm: str
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    nonce: str = Field(min_length=8, max_length=256)
+    proof: str = Field(min_length=16, max_length=256)
+    #: Keep the browser signed in across restarts.
+    remember: bool = True
+
+
+class LoginResponse(BaseModel):
+    ok: bool = True
+    username: str
+    expires_at: float
+
+
+class SessionView(BaseModel):
+    id: str
+    device: str
+    address: str | None = None
+    created_at: float
+    last_seen_at: float
+    expires_at: float
+    current: bool = False
+
+
+class AuthStateResponse(BaseModel):
+    authenticated: bool
+    configured: bool = False
+    username: str | None = None
+    expires_at: float | None = None
+    registered_at: float | None = None
+    sessions: list[SessionView] = Field(default_factory=list)
+
+
 __all__ = [
     "AudioFormat",
+    "AuthStateResponse",
+    "ChallengeRequest",
+    "ChallengeResponse",
     "CookieBrowser",
     "DownloadMode",
     "DownloadRequest",
@@ -138,10 +190,13 @@ __all__ = [
     "ErrorBody",
     "ErrorResponse",
     "JobView",
+    "LoginRequest",
+    "LoginResponse",
     "MediaInfo",
     "MediaQuality",
     "MetaResponse",
     "ProbeRequest",
     "ProbeResponse",
+    "SessionView",
     "SUPPORTED_COOKIE_BROWSERS",
 ]

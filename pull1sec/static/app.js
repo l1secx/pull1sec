@@ -3,6 +3,32 @@
 const I18N = {
   tr: {
     "brand.sub": "yerel video indirici",
+    "boot.checking": "Kontrol ediliyor…",
+    "login.title": "Giriş yap",
+    "login.subtitle": "Devam etmek için hesabına gir.",
+    "login.username": "Kullanıcı adı",
+    "login.password": "Şifre",
+    "login.remember": "Bu cihazda açık kalsın",
+    "login.submit": "Giriş",
+    "login.submitting": "Kanıt hesaplanıyor…",
+    "login.empty": "Kullanıcı adı ve şifre gerekli.",
+    "login.wrong": "Kullanıcı adı veya şifre yanlış.",
+    "login.tooMany": "Çok fazla hatalı deneme. Biraz bekleyip tekrar dene.",
+    "login.offline": "Sunucuya ulaşılamadı.",
+    "login.notConfigured": "Bu sunucuda henüz hesap yok.",
+    "login.notConfiguredHint":
+      "Terminalde `pull1sec user set` (veya `pull1sec tui`) çalıştırıp şifreyi belirle. Kayıt ekranı bilinçli olarak yok: ilk gelen kişi hesabı ele geçiremez.",
+    "login.note":
+      "Sunucu düz HTTP üzerinden yayın yapar; bu yüzden şifre cihazdan hiç çıkmaz, yalnızca tek kullanımlık bir kanıt gönderilir.",
+    "account.sessions": "Açık oturumlar",
+    "account.logout": "Çıkış yap",
+    "account.logoutAll": "Tüm cihazlardan çıkış",
+    "account.you": "bu cihaz",
+    "status.expired": "Oturum sona erdi. Tekrar giriş yap.",
+    "session.now": "şimdi",
+    "session.minutes": "{n} dk önce",
+    "session.hours": "{n} sa önce",
+    "session.days": "{n} gün önce",
     "intro.title": "Bir bağlantı yapıştır, videoyu al.",
     "intro.body":
       "YouTube, TikTok, Instagram, X, Facebook, Reddit, Vimeo, Twitch ve yt-dlp'nin tanıdığı 1800'den fazla site. Dosya bu makinede kalır.",
@@ -58,6 +84,32 @@ const I18N = {
   },
   en: {
     "brand.sub": "local video downloader",
+    "boot.checking": "Checking…",
+    "login.title": "Sign in",
+    "login.subtitle": "Sign in to your account to continue.",
+    "login.username": "Username",
+    "login.password": "Password",
+    "login.remember": "Stay signed in on this device",
+    "login.submit": "Sign in",
+    "login.submitting": "Computing proof…",
+    "login.empty": "Username and password are required.",
+    "login.wrong": "Wrong username or password.",
+    "login.tooMany": "Too many failed attempts. Wait a moment and try again.",
+    "login.offline": "Could not reach the server.",
+    "login.notConfigured": "This server has no account yet.",
+    "login.notConfiguredHint":
+      "Run `pull1sec user set` (or `pull1sec tui`) in a terminal to pick a password. There is no sign-up screen on purpose, so the first visitor cannot claim the account.",
+    "login.note":
+      "The server runs over plain HTTP, so the password never leaves this device — only a single-use proof is sent.",
+    "account.sessions": "Open sessions",
+    "account.logout": "Sign out",
+    "account.logoutAll": "Sign out everywhere",
+    "account.you": "this device",
+    "status.expired": "Your session ended. Sign in again.",
+    "session.now": "just now",
+    "session.minutes": "{n} min ago",
+    "session.hours": "{n} h ago",
+    "session.days": "{n} d ago",
     "intro.title": "Paste a link, get the video.",
     "intro.body":
       "YouTube, TikTok, Instagram, X, Facebook, Reddit, Vimeo, Twitch and the 1800+ sites yt-dlp knows. The file stays on this machine.",
@@ -115,7 +167,12 @@ const I18N = {
 
 const TERMINAL = new Set(["completed", "failed", "canceled"]);
 const TERMINAL_SOURCE = { completed: "job.completed", failed: "job.failed", canceled: "job.canceled" };
-const STORAGE = { lang: "pull1sec.lang", theme: "pull1sec.theme", jobs: "pull1sec.jobs" };
+const STORAGE = {
+  lang: "pull1sec.lang",
+  theme: "pull1sec.theme",
+  jobs: "pull1sec.jobs",
+  user: "pull1sec.user",
+};
 
 const state = {
   lang: "tr",
@@ -123,9 +180,29 @@ const state = {
   mode: "video",
   jobs: new Map(),
   streams: new Map(),
+  username: null,
+  me: null,
 };
 
 const el = {
+  boot: document.getElementById("boot"),
+  login: document.getElementById("login"),
+  loginForm: document.getElementById("login-form"),
+  loginUsername: document.getElementById("login-username"),
+  loginPassword: document.getElementById("login-password"),
+  loginRemember: document.getElementById("login-remember"),
+  loginBtn: document.getElementById("login-btn"),
+  loginStatus: document.getElementById("login-status"),
+  loginEmpty: document.getElementById("login-empty"),
+  loginSub: document.getElementById("login-sub"),
+  account: document.getElementById("account"),
+  accountBtn: document.getElementById("account-btn"),
+  accountName: document.getElementById("account-name"),
+  accountMenu: document.getElementById("account-menu"),
+  sessionList: document.getElementById("session-list"),
+  logoutBtn: document.getElementById("logout-btn"),
+  logoutAllBtn: document.getElementById("logout-all-btn"),
+  app: document.getElementById("app"),
   form: document.getElementById("fetch-form"),
   url: document.getElementById("url"),
   paste: document.getElementById("paste-btn"),
@@ -186,6 +263,7 @@ function applyLang(lang) {
 
   if (state.media) renderPreview();
   state.jobs.forEach((job) => renderJob(job));
+  if (state.me) renderSessions(state.me.sessions || []);
 }
 
 /* ------------------------------------------------------------------ theme */
@@ -219,6 +297,7 @@ async function api(path, { method = "GET", body } = {}) {
     const message = payload?.error?.message || `HTTP ${response.status}`;
     const error = new Error(message);
     error.code = payload?.error?.code || "error";
+    if (response.status === 401 && error.code === "unauthorized") handleUnauthenticated();
     throw error;
   }
   return payload;
@@ -666,6 +745,195 @@ async function loadMeta() {
   }
 }
 
+/* ------------------------------------------------------------------- auth */
+
+function setLoginStatus(message) {
+  el.loginStatus.textContent = message || "";
+}
+
+function showLogin({ configured = true } = {}) {
+  el.boot.hidden = true;
+  el.app.hidden = true;
+  el.login.hidden = false;
+  el.accountMenu.hidden = true;
+  el.loginForm.classList.toggle("is-blocked", configured === false);
+  el.loginEmpty.hidden = configured !== false;
+
+  if (configured === false) {
+    el.loginSub.hidden = true;
+    return;
+  }
+
+  el.loginSub.hidden = false;
+  if (!el.loginUsername.value) {
+    el.loginUsername.value = localStorage.getItem(STORAGE.user) || "";
+  }
+  (el.loginUsername.value ? el.loginPassword : el.loginUsername).focus();
+}
+
+function relativeTime(epochSeconds) {
+  if (!epochSeconds) return "—";
+  const delta = Math.max(0, Date.now() / 1000 - epochSeconds);
+  if (delta < 60) return t("session.now");
+  if (delta < 3600) return t("session.minutes", { n: Math.floor(delta / 60) });
+  if (delta < 86400) return t("session.hours", { n: Math.floor(delta / 3600) });
+  return t("session.days", { n: Math.floor(delta / 86400) });
+}
+
+function renderSessions(sessions) {
+  const items = sessions.map((session) => {
+    const item = document.createElement("li");
+    if (session.current) item.classList.add("is-current");
+
+    const device = document.createElement("span");
+    device.className = "session-device";
+    device.textContent = session.current
+      ? `${session.device} · ${t("account.you")}`
+      : session.device;
+
+    const meta = document.createElement("span");
+    meta.className = "session-meta";
+    meta.textContent = `${session.address || "—"} · ${relativeTime(session.last_seen_at)}`;
+
+    item.append(device, meta);
+    return item;
+  });
+  el.sessionList.replaceChildren(...items);
+}
+
+function handleUnauthenticated() {
+  state.streams.forEach((source) => source.close());
+  state.streams.clear();
+  state.jobs.clear();
+  el.jobList.replaceChildren();
+  updateActivityEmpty();
+  state.me = null;
+  showLogin({ configured: true });
+  setLoginStatus(t("status.expired"));
+  el.loginPassword.value = "";
+}
+
+async function doLogin(event) {
+  if (event) event.preventDefault();
+
+  const username = el.loginUsername.value.trim();
+  const password = el.loginPassword.value;
+  const crypto = window.pull1secCrypto;
+
+  if (!username || !password) {
+    setLoginStatus(t("login.empty"));
+    return;
+  }
+  if (!crypto) {
+    setLoginStatus(t("login.offline"));
+    return;
+  }
+
+  const label = el.loginBtn.querySelector("span");
+  el.loginBtn.disabled = true;
+  el.loginBtn.classList.add("is-busy");
+  label.textContent = t("login.submitting");
+  setLoginStatus("");
+
+  try {
+    // 1. Single-use nonce plus the public salt/iteration parameters.
+    const challenge = await api("/api/auth/challenge", {
+      method: "POST",
+      body: { username },
+    });
+
+    // 2. Derive the verifier in the browser, mix it with the nonce. The
+    //    password itself is never put in a request body.
+    const verifier = await crypto.deriveVerifier(
+      password,
+      challenge.salt,
+      challenge.iterations,
+    );
+    const proof = await crypto.deriveProof(verifier, challenge.nonce, challenge.iterations);
+
+    const result = await api("/api/auth/login", {
+      method: "POST",
+      body: {
+        username,
+        nonce: challenge.nonce,
+        proof: crypto.toHex(proof),
+        remember: el.loginRemember.checked,
+      },
+    });
+
+    el.loginPassword.value = "";
+    localStorage.setItem(STORAGE.user, result.username);
+    await enterApp();
+  } catch (error) {
+    if (error.code === "auth_not_configured") {
+      showLogin({ configured: false });
+    } else if (error.code === "bad_credentials") {
+      setLoginStatus(t("login.wrong"));
+    } else if (error.code === "too_many_attempts") {
+      setLoginStatus(error.message || t("login.tooMany"));
+    } else {
+      setLoginStatus(error.message || t("login.offline"));
+    }
+    el.loginPassword.select();
+  } finally {
+    el.loginBtn.disabled = false;
+    el.loginBtn.classList.remove("is-busy");
+    label.textContent = t("login.submit");
+  }
+}
+
+async function enterApp() {
+  const me = await api("/api/auth/me");
+  state.me = me;
+  state.username = me.username;
+  el.accountName.textContent = me.username || "";
+  el.account.hidden = false;
+  renderSessions(me.sessions || []);
+
+  el.login.hidden = true;
+  el.app.hidden = false;
+  el.boot.hidden = true;
+
+  applyLang(state.lang);
+  await Promise.allSettled([loadMeta(), restoreJobs()]);
+}
+
+async function logout(all) {
+  try {
+    await api(all ? "/api/auth/logout-all" : "/api/auth/logout", { method: "POST" });
+  } catch {
+    /* the cookie is cleared client-side by the reload either way */
+  }
+  window.location.reload();
+}
+
+async function bootstrap() {
+  let me = null;
+  try {
+    me = await api("/api/auth/me");
+  } catch {
+    showLogin({ configured: true });
+    setLoginStatus(t("login.offline"));
+    return;
+  }
+
+  if (me && me.authenticated) {
+    state.me = me;
+    state.username = me.username;
+    el.accountName.textContent = me.username || "";
+    el.account.hidden = false;
+    renderSessions(me.sessions || []);
+    el.login.hidden = true;
+    el.app.hidden = false;
+    el.boot.hidden = true;
+    applyLang(state.lang);
+    await Promise.allSettled([loadMeta(), restoreJobs()]);
+    return;
+  }
+
+  showLogin({ configured: Boolean(me?.configured) });
+}
+
 /* -------------------------------------------------------------------- init */
 
 function init() {
@@ -704,8 +972,37 @@ function init() {
     });
   });
 
-  loadMeta();
-  restoreJobs();
+  // --- auth wiring
+  el.loginForm.addEventListener("submit", doLogin);
+  el.accountBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const open = el.accountMenu.hidden;
+    el.accountMenu.hidden = !open;
+    el.accountBtn.setAttribute("aria-expanded", String(open));
+  });
+  el.logoutBtn.addEventListener("click", () => logout(false));
+  el.logoutAllBtn.addEventListener("click", () => logout(true));
+  document.addEventListener("click", (event) => {
+    if (!el.account.contains(event.target)) {
+      el.accountMenu.hidden = true;
+      el.accountBtn.setAttribute("aria-expanded", "false");
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      el.accountMenu.hidden = true;
+      el.accountBtn.setAttribute("aria-expanded", "false");
+    }
+  });
+  window.addEventListener("focus", () => {
+    // Coming back to a laptop that was asleep: refresh the session list.
+    if (state.me) api("/api/auth/me").then((me) => {
+      state.me = me;
+      renderSessions(me.sessions || []);
+    }).catch(() => {});
+  });
+
+  bootstrap();
 }
 
 init();
