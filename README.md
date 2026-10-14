@@ -20,9 +20,21 @@ Gerekenler: **Python 3.11+**, **ffmpeg** ve **uv** (veya pip).
 
 ```bash
 cd pull1sec
-uv sync                              # bağımlılıkları kurar
-uv run python -m pull1sec user set   # hesabı oluştur (şifreyi sen belirle)
-./run.sh                             # sunucuyu başlat
+uv sync                                   # bağımlılıkları kurar
+uv tool install --editable .              # `pull1sec` komutunu PATH'e kurar
+pull1sec user set                         # hesabı oluştur (şifreyi sen belirle)
+pull1sec                                  # sunucuyu başlat
+```
+
+`pull1sec` artık her dizinden çalışır (`~/.local/bin/pull1sec`). Ayrıntılı
+bağımlılık değişikliğinden sonra komutu tazelemek için `uv tool install
+--editable .` komutunu tekrar çalıştırın.
+
+Alternatifler:
+
+```bash
+./run.sh              # proje sanal ortamıyla başlatır (uv run kullanır)
+uv run pull1sec       # proje sanal ortamındaki komut
 ```
 
 Başlatınca adresleri yazar:
@@ -39,7 +51,7 @@ kullanıcı adı ve şifreyle gir. Arayüz Türkçe/İngilizce ve açık/koyu te
 destekler. Dosyalar sunucuda kalır, dışarıya hiçbir şey gönderilmez; indirilen
 dosyalar varsayılan olarak bir saat sonra silinir.
 
-`uv` yerine düz pip ile:
+`uv` yoksa düz pip ile:
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
@@ -69,13 +81,13 @@ değiştirilir:
 
 ```bash
 # Şifreyi belirle / değiştir (mevcut şifre sorulur)
-uv run python -m pull1sec user set
+pull1sec user set
 
 # Kullanıcı adını da değiştir
-uv run python -m pull1sec user set --username kerem
+pull1sec user set --username kerem
 
 # Tam ekran arayüz: menüden şifre/kullanıcı adı değiştir, oturumları yönet
-uv run python -m pull1sec tui
+pull1sec tui
 ```
 
 TUI açılışta ağ adresini, kullanıcıyı, açık oturum sayısını ve şifre
