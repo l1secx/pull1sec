@@ -53,6 +53,8 @@ pull1sec
 Betik uygulamayı `~/.local/share/pull1sec/app` altına açar, bağımlılıkları
 `~/.local/share/pull1sec/venv` içine kurar ve `~/.local/bin/pull1sec`
 başlatıcısını yazar. `~/.local/bin` PATH'te değilse betik bunu söyler.
+Aynı adı taşıyan eski bir komut varsa silinmez; zaman damgalı `.bak-*` dosyasına
+yedeklenir.
 
 Kaldırmak için:
 
