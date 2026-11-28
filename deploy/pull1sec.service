@@ -1,20 +1,21 @@
 [Unit]
 Description=Pull1sec — video downloader, reachable from the local network
-Documentation=file://%h/web/pull1sec/README.md
+Documentation=https://github.com/l1secx/pull1sec
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 # The default port (8787) is unprivileged, so this needs no root and no
-# capabilities of its own.
+# capabilities of its own. The npm launcher also lives in ~/.local/bin; if you
+# installed with npm -g into another prefix, point ExecStart at `which pull1sec`.
 ExecStart=%h/.local/bin/pull1sec serve
-WorkingDirectory=%h/web/pull1sec
+WorkingDirectory=%h
 Restart=on-failure
 RestartSec=3
 
 # Modest hardening. Deliberately no ProtectHome: yt-dlp writes its cache under
-# ~/.cache and Python reads the editable install from the source tree.
+# ~/.cache and the launcher reads its private environment under ~/.local/share.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full

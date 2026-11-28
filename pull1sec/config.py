@@ -57,7 +57,11 @@ def _default_download_dir() -> Path:
     raw = os.getenv(f"{ENV_PREFIX}DOWNLOAD_DIR")
     if raw:
         return Path(raw).expanduser().resolve()
-    return (Path(__file__).resolve().parent.parent / ".downloads").resolve()
+    # Keep downloads in the user's data directory, not next to the source:
+    # installed copies live in a read-only-ish cache dir (npm/curl installers).
+    base = os.getenv("XDG_DATA_HOME")
+    root = Path(base).expanduser() if base else Path.home() / ".local" / "share"
+    return (root / "pull1sec" / "downloads").resolve()
 
 
 def _default_state_dir() -> Path:

@@ -1,0 +1,48 @@
+{
+  "name": "pull1sec",
+  "version": "1.0.0",
+  "description": "Paste any social media URL, get the video. Self-hosted downloader built on yt-dlp.",
+  "keywords": [
+    "yt-dlp",
+    "video",
+    "downloader",
+    "self-hosted",
+    "fastapi"
+  ],
+  "license": "MIT",
+  "author": "l1secx",
+  "homepage": "https://github.com/l1secx/pull1sec",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/l1secx/pull1sec.git"
+  },
+  "bugs": {
+    "url": "https://github.com/l1secx/pull1sec/issues"
+  },
+  "bin": {
+    "pull1sec": "bin/pull1sec.js"
+  },
+  "files": [
+    "bin/",
+    "pull1sec/*.py",
+    "pull1sec/static/",
+    "requirements.txt",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "linux",
+    "darwin",
+    "win32"
+  ],
+  "scripts": {
+    "test": "node tests/js/pbkdf2.mjs && node --check pull1sec/static/app.js && node --check pull1sec/static/auth.js",
+    "pack:check": "npm pack --dry-run"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -16,19 +16,54 @@ yayın yaptığından parola hiçbir zaman ağdan geçmez — ayrıntısı
 
 ## Hızlı başlangıç
 
-Gerekenler: **Python 3.11+**, **ffmpeg** ve **uv** (veya pip).
+Gerekenler: **Python 3.11+** ve **ffmpeg**. Python bağımlılıkları kendi özel
+ortamına otomatik kurulur; elle sanal ortam oluşturmanız ya da etkinleştirmeniz
+gerekmez.
+
+### npm
 
 ```bash
-cd pull1sec
-uv sync                                   # bağımlılıkları kurar
-uv tool install --editable .              # `pull1sec` komutunu PATH'e kurar
-pull1sec user set                         # hesabı oluştur (şifreyi sen belirle)
-pull1sec                                  # sunucuyu başlat
+npm install -g pull1sec
+pull1sec user set     # hesabı oluştur (şifreyi sen belirle)
+pull1sec              # sunucuyu başlat
 ```
 
-`pull1sec` artık her dizinden çalışır (`~/.local/bin/pull1sec`). Ayrıntılı
-bağımlılık değişikliğinden sonra komutu tazelemek için `uv tool install
---editable .` komutunu tekrar çalıştırın.
+Paket ilk çalıştırmada `~/.local/share/pull1sec/venv` altında özel bir Python
+ortamı kurar ve bağımlılıkları oraya yükler. Proje dizini, etkin bir venv ya da
+`pip` gerekmez. Güncelleme: `npm update -g pull1sec`. Kurmadan denemek için:
+`npx pull1sec`.
+
+Sistemde `python3` yoksa `PULL1SEC_PYTHON=/yol/python3` ile yolu belirtin.
+Kurulum kökünü değiştirmek için `PULL1SEC_HOME` kullanılır.
+
+### curl
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/l1secx/pull1sec/main/install.sh | bash
+pull1sec user set
+pull1sec
+```
+
+Betik uygulamayı `~/.local/share/pull1sec/app` altına açar, bağımlılıkları
+`~/.local/share/pull1sec/venv` içine kurar ve `~/.local/bin/pull1sec`
+başlatıcısını yazar. `~/.local/bin` PATH'te değilse betik bunu söyler.
+
+Kaldırmak için:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/l1secx/pull1sec/main/install.sh | bash -s -- --uninstall
+```
+
+> `curl | bash` uzaktan kod çalıştırır. Betiği çalıştırmadan önce
+> [inceleyin](https://github.com/l1secx/pull1sec/blob/main/install.sh).
+
+### Kaynaktan (geliştirme)
+
+```bash
+uv sync                         # bağımlılıkları kurar
+uv run pull1sec user set        # hesabı oluştur
+uv run pull1sec                 # sunucuyu başlat
+```
 
 Alternatifler:
 
@@ -223,7 +258,7 @@ Tüm ayarlar ortam değişkeniyle verilir; hepsi isteğe bağlıdır.
 | `PULL1SEC_STATE_DIR` | `~/.local/state/pull1sec` | Hesap ve oturumların tutulduğu dizin |
 | `PULL1SEC_SESSION_TTL` | `2592000` (30 gün) | Oturum ömrü (saniye) |
 | `PULL1SEC_REQUIRE_AUTH` | `1` | `0` yapılırsa ağa açıkken bile şifre sorulmaz (önerilmez) |
-| `PULL1SEC_DOWNLOAD_DIR` | `./.downloads` | Geçici dosya dizini |
+| `PULL1SEC_DOWNLOAD_DIR` | `~/.local/share/pull1sec/downloads` | Geçici dosya dizini |
 | `PULL1SEC_MAX_CONCURRENT` | `3` | Aynı anda inen dosya sayısı |
 | `PULL1SEC_JOB_TTL` | `3600` | Tamamlanan işlerin ömrü (saniye) |
 | `PULL1SEC_MAX_FILESIZE_MB` | `0` (sınırsız) | Tek dosya üst sınırı |
@@ -308,6 +343,8 @@ uv sync --extra dev
 uv run pytest                    # 177 test, ağ kullanmaz
 node tests/js/pbkdf2.mjs         # tarayıcı kriptografisini node ile doğrular
 node --check pull1sec/static/app.js
+npm test                         # yukarıdaki JS kontrollerinin hepsi
+npm pack --dry-run               # npm paketinin içeriğini denetler
 ```
 
 Kriptografi testi özellikle önemli: tarayıcı tarafındaki `PBKDF2`/`SHA-256`,
@@ -318,6 +355,9 @@ test edilir.
 Dizinler:
 
 ```
+bin/pull1sec.js  npm başlatıcısı: özel Python ortamını kurar ve uygulamayı açar
+install.sh       curl | bash kurulumu (aynı ortamı paylaşır)
+requirements.txt çalışma zamanı bağımlılıkları (pyproject ile aynı)
 pull1sec/
   cli.py         serve / user / sessions / tui komutları
   tui.py         curses tabanlı tam ekran arayüz

@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dev
+      - run: uv run pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: node tests/js/pbkdf2.mjs
+      - run: node --check pull1sec/static/app.js
+      - run: node --check pull1sec/static/auth.js
+      - run: node --check bin/pull1sec.js
+      - run: bash -n install.sh && bash -n run.sh
+      - run: npm pack --dry-run
+
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: npm install and launch
+        env:
+          PULL1SEC_HOME: ${{ runner.temp }}/pull1sec-home
+        run: |
+          npm install -g --prefix "${{ runner.temp }}/npm" .
+          "${{ runner.temp }}/npm/bin/pull1sec" version
+      - name: curl installer and launch
+        if: github.event_name == 'push'
+        env:
+          PULL1SEC_HOME: ${{ runner.temp }}/pull1sec-curl
+          PULL1SEC_BIN_DIR: ${{ runner.temp }}/bin
+          PULL1SEC_REPO: https://github.com/${{ github.repository }}
+          PULL1SEC_REF: ${{ github.ref_name }}
+        run: |
+          bash install.sh
+          "${{ runner.temp }}/bin/pull1sec" version
