@@ -36,6 +36,12 @@ ortamı kurar ve bağımlılıkları oraya yükler. Proje dizini, etkin bir venv
 Sistemde `python3` yoksa `PULL1SEC_PYTHON=/yol/python3` ile yolu belirtin.
 Kurulum kökünü değiştirmek için `PULL1SEC_HOME` kullanılır.
 
+npm registry'deki sürüm henüz yayında değilse doğrudan repodan kurun:
+
+```bash
+npm install -g github:l1secx/pull1sec
+```
+
 ### curl
 
 ```bash
